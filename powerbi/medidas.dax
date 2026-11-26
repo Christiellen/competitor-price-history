@@ -1,0 +1,152 @@
+// =============================================================================
+// Medidas do painel "Tarifas da Concorrência - Rodoviário"
+// Crie uma tabela vazia chamada _Medidas e cole cada medida nela.
+// Nomes de tabela conforme renomeados no Power Query (ver powerbi/README.md):
+//   Curva          = agg_fare_curve           (rota x classe x saída x antecedência)
+//   Tarifa         = fct_fare_snapshot_daily  (concorrente x saída x classe x dia)
+//   Periodo        = fct_fare_interval        (períodos de mesma tarifa)
+//   Rota           = dim_route
+//   Classe         = dim_service_class
+//   Empresa        = dim_competitor
+//   DataSaida      = dim_date (papel: data da saída, marcada como tabela de datas)
+//   DataCaptura    = dim_date (papel: data da captura, referência da mesma consulta)
+// =============================================================================
+
+
+// ---------- Visão geral ----------
+
+Saídas Monitoradas =
+SUM ( Curva[our_departures] ) + SUM ( Curva[market_departures] )
+
+// Índice de tarifa na MESMA antecedência: tarifa média do mercado / a nossa,
+// só nas linhas em que os dois lados têm tarifa, com médias ponderadas pelo
+// número de saídas com tarifa. Mesma fórmula da métrica price_index do dbt
+// (dbt/models/marts/_semantic.yml). Acima de 1: o mercado está mais caro.
+Índice de Tarifa =
+VAR _linhas =
+    FILTER ( Curva, NOT ISBLANK ( Curva[our_avg_price] ) && NOT ISBLANK ( Curva[market_avg_price] ) )
+VAR _mercado =
+    DIVIDE (
+        SUMX ( _linhas, Curva[market_avg_price] * ( Curva[market_departures] - Curva[market_sold_out_departures] ) ),
+        SUMX ( _linhas, Curva[market_departures] - Curva[market_sold_out_departures] )
+    )
+VAR _nossa =
+    DIVIDE (
+        SUMX ( _linhas, Curva[our_avg_price] * ( Curva[our_departures] - Curva[our_sold_out_departures] ) ),
+        SUMX ( _linhas, Curva[our_departures] - Curva[our_sold_out_departures] )
+    )
+RETURN
+    DIVIDE ( _mercado, _nossa )
+
+Índice de Tarifa 7 dias antes =
+CALCULATE ( [Índice de Tarifa], DATEADD ( DataSaida[date_day], -7, DAY ) )
+
+Variação do Índice (7 dias) =
+[Índice de Tarifa] - [Índice de Tarifa 7 dias antes]
+
+% Mais Caros que Todos =
+VAR _comparaveis =
+    CALCULATE ( COUNTROWS ( Curva ), Curva[price_position] IN { "mais caro que todos", "mais barato que todos", "dentro da faixa" } )
+RETURN
+    DIVIDE ( CALCULATE ( COUNTROWS ( Curva ), Curva[price_position] = "mais caro que todos" ), _comparaveis )
+
+% Mais Baratos que Todos =
+VAR _comparaveis =
+    CALCULATE ( COUNTROWS ( Curva ), Curva[price_position] IN { "mais caro que todos", "mais barato que todos", "dentro da faixa" } )
+RETURN
+    DIVIDE ( CALCULATE ( COUNTROWS ( Curva ), Curva[price_position] = "mais barato que todos" ), _comparaveis )
+
+
+// ---------- Curva de antecedência ----------
+
+// Médias ponderadas pelo número de saídas com tarifa (não a média das médias
+// de cada linha). Mesmas fórmulas de our_avg_fare e market_avg_fare no dbt.
+Nossa Tarifa Média =
+DIVIDE (
+    SUMX ( Curva, Curva[our_avg_price] * ( Curva[our_departures] - Curva[our_sold_out_departures] ) ),
+    SUM ( Curva[our_departures] ) - SUM ( Curva[our_sold_out_departures] )
+)
+
+Tarifa Média do Mercado =
+DIVIDE (
+    SUMX ( Curva, Curva[market_avg_price] * ( Curva[market_departures] - Curva[market_sold_out_departures] ) ),
+    SUM ( Curva[market_departures] ) - SUM ( Curva[market_sold_out_departures] )
+)
+
+Menor Tarifa do Mercado =
+MIN ( Curva[market_min_price] )
+
+// Diferença percentual entre a nossa tarifa e a menor do mercado.
+// Positivo: estamos acima do concorrente mais barato.
+Distância para o Mais Barato =
+DIVIDE ( [Nossa Tarifa Média] - [Menor Tarifa do Mercado], [Menor Tarifa do Mercado] )
+
+
+// ---------- Esgotamento (sinal de demanda) ----------
+
+Taxa de Esgotamento - Nossa =
+DIVIDE ( SUM ( Curva[our_sold_out_departures] ), SUM ( Curva[our_departures] ) )
+
+Taxa de Esgotamento - Mercado =
+DIVIDE ( SUM ( Curva[market_sold_out_departures] ), SUM ( Curva[market_departures] ) )
+
+// Por empresa, na tabela de snapshots
+Taxa de Esgotamento =
+DIVIDE (
+    CALCULATE ( COUNTROWS ( Tarifa ), Tarifa[is_sold_out] = TRUE () ),
+    COUNTROWS ( Tarifa )
+)
+
+
+// ---------- Concorrentes ----------
+
+Tarifa Média =
+AVERAGE ( Tarifa[price] )
+
+// Em quantas combinações rota x classe x saída x antecedência a empresa foi a
+// mais barata. Usa o relacionamento inativo Curva[cheapest_competitor_id] -> Empresa.
+Vezes que Foi o Mais Barato =
+CALCULATE (
+    COUNTROWS ( Curva ),
+    USERELATIONSHIP ( Curva[cheapest_competitor_id], Empresa[competitor_id] )
+)
+
+// Um período novo com tarifa anterior = uma mudança de tarifa.
+Mudanças de Tarifa =
+CALCULATE (
+    COUNTROWS ( Periodo ),
+    NOT ISBLANK ( Periodo[previous_price] ),
+    Periodo[is_sold_out] = FALSE ()
+)
+
+// Média de mudanças por saída: mostra quem pratica precificação dinâmica.
+// Perto de zero: tarifa fixa.
+Mudanças por Saída =
+DIVIDE (
+    [Mudanças de Tarifa],
+    COUNTROWS (
+        SUMMARIZE ( Periodo, Periodo[competitor_id], Periodo[route_id], Periodo[class_code], Periodo[departure_at] )
+    )
+)
+
+Variação Média por Mudança =
+CALCULATE (
+    AVERAGE ( Periodo[pct_change_from_previous] ),
+    NOT ISBLANK ( Periodo[previous_price] )
+)
+
+
+// ---------- Textos dinâmicos ----------
+
+Título Índice =
+VAR _i = [Índice de Tarifa]
+RETURN
+    SWITCH (
+        TRUE (),
+        ISBLANK ( _i ), "Sem dados comparáveis no período",
+        _i >= 1, "Mercado " & FORMAT ( _i - 1, "0.0%" ) & " mais caro que nós",
+        "Mercado " & FORMAT ( 1 - _i, "0.0%" ) & " mais barato que nós"
+    )
+
+Data da Última Captura =
+"Capturas até " & FORMAT ( MAX ( Curva[capture_date] ), "dd/mm/yyyy" )

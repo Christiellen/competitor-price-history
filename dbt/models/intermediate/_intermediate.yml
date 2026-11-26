@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: int_fare_changes
+    description: >
+      Snapshot diário com a tarifa anterior (LAG), a marca de mudança e o número
+      do período de mesma tarifa (soma acumulada das mudanças). Base da
+      fct_fare_interval.
+
+unit_tests:
+  - name: fare_period_restarts_when_fare_returns_or_sells_out
+    description: >
+      Mesma saída capturada em cinco dias: 100, 100, 120, esgotado, 100.
+      Voltar a um preço antigo e esgotar são períodos novos.
+    model: int_fare_changes
+    given:
+      - input: ref('fct_fare_snapshot_daily')
+        rows:
+          - {competitor_id: 2, route_id: 1, class_code: "CONV", departure_at: "2026-12-20 08:00:00", capture_date: "2026-12-01", days_before_departure: 19, price: 100, is_sold_out: false}
+          - {competitor_id: 2, route_id: 1, class_code: "CONV", departure_at: "2026-12-20 08:00:00", capture_date: "2026-12-02", days_before_departure: 18, price: 100, is_sold_out: false}
+          - {competitor_id: 2, route_id: 1, class_code: "CONV", departure_at: "2026-12-20 08:00:00", capture_date: "2026-12-03", days_before_departure: 17, price: 120, is_sold_out: false}
+          - {competitor_id: 2, route_id: 1, class_code: "CONV", departure_at: "2026-12-20 08:00:00", capture_date: "2026-12-04", days_before_departure: 16, price: null, is_sold_out: true}
+          - {competitor_id: 2, route_id: 1, class_code: "CONV", departure_at: "2026-12-20 08:00:00", capture_date: "2026-12-05", days_before_departure: 15, price: 100, is_sold_out: false}
+    expect:
+      rows:
+        - {capture_date: "2026-12-01", is_change: true, fare_period: 1}
+        - {capture_date: "2026-12-02", is_change: false, fare_period: 1}
+        - {capture_date: "2026-12-03", is_change: true, fare_period: 2}
+        - {capture_date: "2026-12-04", is_change: true, fare_period: 3}
+        - {capture_date: "2026-12-05", is_change: true, fare_period: 4}

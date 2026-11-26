@@ -1,0 +1,229 @@
+version: 2
+
+# Camada semântica (MetricFlow): a definição única de cada métrica.
+#
+# Por que existe: agg_fare_curve guarda médias por linha. Somar ou tirar a média
+# dessas médias dá número errado assim que o painel, um analista ou um agente de
+# IA agrega mais de uma rota, classe ou dia. Aqui cada média é definida como
+# razão de somas (média ponderada pelo número de saídas com tarifa), e o
+# price_index divide essas médias nas linhas em que os dois lados têm tarifa,
+# em vez de tirar a média do índice de cada linha.
+#
+# Consulta (com dbt-metricflow instalado):
+#   mf query --metrics price_index,market_sold_out_rate --group-by metric_time__month,route__route_name
+
+semantic_models:
+  - name: fare_curve
+    description: Nossa tarifa x mercado por rota, classe, data da saída e antecedência.
+    model: ref('agg_fare_curve')
+    primary_entity: fare_curve_point
+    defaults:
+      agg_time_dimension: departure_date
+    entities:
+      - name: route
+        type: foreign
+        expr: route_id
+      - name: service_class
+        type: foreign
+        expr: class_code
+    dimensions:
+      - name: departure_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: capture_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: days_before_departure
+        type: categorical
+        description: '{{ doc("antecedence") }}'
+      - name: antecedence_band
+        type: categorical
+      - name: price_position
+        type: categorical
+        description: '{{ doc("price_position") }}'
+    measures:
+      - name: our_departures
+        agg: sum
+      - name: our_sold_out_departures
+        agg: sum
+      - name: our_priced_departures
+        agg: sum
+        expr: our_departures - our_sold_out_departures
+      - name: our_fare_sum
+        description: Soma das tarifas nossas (média da linha x saídas com tarifa).
+        agg: sum
+        expr: our_avg_price * (our_departures - our_sold_out_departures)
+      - name: market_departures
+        agg: sum
+      - name: market_sold_out_departures
+        agg: sum
+      - name: market_priced_departures
+        agg: sum
+        expr: market_departures - market_sold_out_departures
+      - name: market_fare_sum
+        description: Soma das tarifas do mercado (média da linha x saídas com tarifa).
+        agg: sum
+        expr: market_avg_price * (market_departures - market_sold_out_departures)
+      # versões "comparáveis": só linhas em que nós e o mercado temos tarifa,
+      # base do price_index (comparar linha com linha, não médias de universos diferentes)
+      - name: our_fare_sum_comparable
+        agg: sum
+        expr: "if(our_avg_price is not null and market_avg_price is not null, our_avg_price * (our_departures - our_sold_out_departures), 0)"
+      - name: our_priced_departures_comparable
+        agg: sum
+        expr: "if(our_avg_price is not null and market_avg_price is not null, our_departures - our_sold_out_departures, 0)"
+      - name: market_fare_sum_comparable
+        agg: sum
+        expr: "if(our_avg_price is not null and market_avg_price is not null, market_avg_price * (market_departures - market_sold_out_departures), 0)"
+      - name: market_priced_departures_comparable
+        agg: sum
+        expr: "if(our_avg_price is not null and market_avg_price is not null, market_departures - market_sold_out_departures, 0)"
+
+  - name: routes
+    description: Rotas da nossa malha.
+    model: ref('dim_route')
+    entities:
+      - name: route
+        type: primary
+        expr: route_id
+    dimensions:
+      - name: route_name
+        type: categorical
+      - name: city_pair
+        type: categorical
+      - name: origin_state
+        type: categorical
+      - name: destination_state
+        type: categorical
+
+  - name: service_classes
+    description: Classes de serviço (convencional, executivo, semi-leito, leito).
+    model: ref('dim_service_class')
+    entities:
+      - name: service_class
+        type: primary
+        expr: class_code
+    dimensions:
+      - name: class_name
+        type: categorical
+
+metrics:
+  # métricas simples: base das razões abaixo
+  - name: our_departures
+    label: Saídas nossas
+    type: simple
+    type_params:
+      measure: our_departures
+
+  - name: our_sold_out_departures
+    label: Saídas nossas esgotadas
+    type: simple
+    type_params:
+      measure: our_sold_out_departures
+
+  - name: our_priced_departures
+    label: Saídas nossas com tarifa
+    type: simple
+    type_params:
+      measure: our_priced_departures
+
+  - name: our_fare_sum
+    label: Soma de tarifas nossas
+    type: simple
+    type_params:
+      measure: our_fare_sum
+
+  - name: market_departures
+    label: Saídas do mercado
+    type: simple
+    type_params:
+      measure: market_departures
+
+  - name: market_sold_out_departures
+    label: Saídas do mercado esgotadas
+    type: simple
+    type_params:
+      measure: market_sold_out_departures
+
+  - name: market_priced_departures
+    label: Saídas do mercado com tarifa
+    type: simple
+    type_params:
+      measure: market_priced_departures
+
+  - name: market_fare_sum
+    label: Soma de tarifas do mercado
+    type: simple
+    type_params:
+      measure: market_fare_sum
+
+  - name: our_fare_sum_comparable
+    label: Soma de tarifas nossas (linhas comparáveis)
+    type: simple
+    type_params:
+      measure: our_fare_sum_comparable
+
+  - name: our_priced_departures_comparable
+    label: Saídas nossas com tarifa (linhas comparáveis)
+    type: simple
+    type_params:
+      measure: our_priced_departures_comparable
+
+  - name: market_fare_sum_comparable
+    label: Soma de tarifas do mercado (linhas comparáveis)
+    type: simple
+    type_params:
+      measure: market_fare_sum_comparable
+
+  - name: market_priced_departures_comparable
+    label: Saídas do mercado com tarifa (linhas comparáveis)
+    type: simple
+    type_params:
+      measure: market_priced_departures_comparable
+
+  # métricas de negócio
+  - name: our_avg_fare
+    label: Tarifa média nossa
+    description: Média ponderada das nossas tarifas, sem saídas esgotadas.
+    type: ratio
+    type_params:
+      numerator: our_fare_sum
+      denominator: our_priced_departures
+
+  - name: market_avg_fare
+    label: Tarifa média do mercado
+    description: Média ponderada das tarifas dos concorrentes, sem saídas esgotadas.
+    type: ratio
+    type_params:
+      numerator: market_fare_sum
+      denominator: market_priced_departures
+
+  - name: price_index
+    label: Índice de preço (mercado / nós)
+    description: '{{ doc("price_index") }}'
+    type: derived
+    type_params:
+      expr: (market_fare_sum_comparable / nullif(market_priced_departures_comparable, 0)) / nullif(our_fare_sum_comparable / nullif(our_priced_departures_comparable, 0), 0)
+      metrics:
+        - name: market_fare_sum_comparable
+        - name: market_priced_departures_comparable
+        - name: our_fare_sum_comparable
+        - name: our_priced_departures_comparable
+
+  - name: our_sold_out_rate
+    label: Taxa de esgotamento nossa
+    description: '{{ doc("sold_out") }}'
+    type: ratio
+    type_params:
+      numerator: our_sold_out_departures
+      denominator: our_departures
+
+  - name: market_sold_out_rate
+    label: Taxa de esgotamento do mercado
+    description: '{{ doc("sold_out") }}'
+    type: ratio
+    type_params:
+      numerator: market_sold_out_departures
+      denominator: market_departures

@@ -1,0 +1,22 @@
+version: 2
+
+seeds:
+  - name: service_class_map
+    description: >
+      De-para dos rótulos de classe usados pelos sites (já em maiúsculas e sem
+      espaços nas pontas) para a nossa classe de serviço. Rótulo novo que
+      aparecer na captura gera alerta em fct_fare_capture.class_code.
+    config:
+      column_types:
+        raw_label: string
+        class_code: string
+        class_name: string
+        class_rank: int64
+    columns:
+      - name: raw_label
+        data_tests: [unique, not_null]
+      - name: class_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['CONV', 'EXEC', 'SEMI', 'LEITO']

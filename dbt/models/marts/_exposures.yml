@@ -1,0 +1,27 @@
+version: 2
+
+# Quem consome os marts. Aparecem na linhagem do dbt docs: antes de mudar um
+# modelo, `dbt ls --select +exposure:painel_tarifas_concorrencia` mostra tudo
+# de que o painel depende.
+
+exposures:
+  - name: painel_tarifas_concorrencia
+    label: Painel Tarifas da Concorrência
+    type: dashboard
+    maturity: medium
+    description: >
+      Painel Power BI de nossa tarifa x mercado na mesma antecedência, curva de
+      preço por saída e histórico de mudanças dos concorrentes. Montagem em
+      powerbi/README.md.
+    owner:
+      name: Christiellen Okubo
+      email: chris.ellen20@gmail.com
+    depends_on:
+      - ref('agg_fare_curve')
+      - ref('fct_fare_snapshot_daily')
+      - ref('fct_fare_interval')
+      - ref('dim_route')
+      - ref('dim_service_class')
+      - ref('dim_competitor')
+      - ref('dim_date')
+

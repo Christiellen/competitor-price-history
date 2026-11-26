@@ -1,0 +1,52 @@
+version: 2
+
+models:
+  - name: stg_raw__fare_captures
+    description: Capturas brutas com tipos e textos padronizados. Ainda contém reenvios.
+
+  - name: stg_raw__competitors
+    columns:
+      - name: competitor_id
+        data_tests: [unique, not_null]
+
+  - name: stg_raw__localities
+    columns:
+      - name: locality_id
+        data_tests: [unique, not_null]
+      - name: ibge_code
+        data_tests: [unique, not_null]
+
+  - name: stg_raw__routes
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [origin_locality_id, destination_locality_id]
+    columns:
+      - name: route_id
+        data_tests: [unique, not_null]
+      - name: origin_locality_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_raw__localities')
+                field: locality_id
+      - name: destination_locality_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_raw__localities')
+                field: locality_id
+
+  - name: stg_raw__locality_aliases
+    description: De-para da grafia de cada site para a nossa cidade.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [competitor_id, raw_name]
+    columns:
+      - name: locality_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_raw__localities')
+                field: locality_id

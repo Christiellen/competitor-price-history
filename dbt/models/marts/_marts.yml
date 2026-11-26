@@ -1,0 +1,290 @@
+version: 2
+
+models:
+  - name: fct_fare_capture
+    description: >
+      Uma linha por captura de tarifa, sem reenvios, com a cidade e a classe de
+      cada site convertidas para a nossa rota e a nossa classe. Incremental por
+      datas de captura afetadas (insert_overwrite). Contrato fixo: é a base de
+      todos os outros modelos de tarifa.
+    config:
+      contract:
+        enforced: true
+      meta:
+        owner: analytics-engineering
+        grain: uma captura de tarifa (concorrente, rota, saída, classe, momento da captura)
+        freshness_sla: D-1 até 07h
+        contains_pii: false
+        ai_context: >
+          Fato de granularidade fina, com reenvios já removidos. Para perguntas
+          de preço use agg_fare_curve ou fct_fare_snapshot_daily: somar price
+          aqui conta a mesma saída várias vezes no mesmo dia.
+    data_tests:
+      - volume_vs_baseline:
+          name: capture_volume_within_baseline
+          arguments:
+            date_column: capture_date
+            lookback_days: 7
+            min_ratio: 0.5
+            max_ratio: 2.0
+            ignore_latest_day: true
+          config:
+            severity: warn
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [competitor_id, origin_name, destination_name, departure_at, service_class_label, captured_at]
+      - dbt_utils.expression_is_true:
+          name: no_capture_after_departure
+          arguments:
+            expression: "days_before_departure >= 0"
+      - dbt_utils.expression_is_true:
+          name: price_present_unless_sold_out
+          arguments:
+            expression: "is_sold_out or price > 0"
+      - dbt_utils.expression_is_true:
+          name: sold_out_without_price
+          arguments:
+            expression: "not is_sold_out or price is null"
+          config:
+            severity: warn
+    columns:
+      - name: capture_key
+        data_type: string
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: competitor_id
+        data_type: int64
+        constraints: [{type: not_null}]
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_competitor')
+                field: competitor_id
+      - name: route_id
+        data_type: int64
+        description: Nulo quando a origem ou o destino estão fora da nossa malha ou com grafia desconhecida.
+        data_tests:
+          - not_null:
+              name: captures_outside_our_routes
+              config:
+                severity: warn
+          - relationships:
+              arguments:
+                to: ref('dim_route')
+                field: route_id
+      - name: origin_locality_id
+        data_type: int64
+      - name: destination_locality_id
+        data_type: int64
+      - name: class_code
+        data_type: string
+        description: Nulo quando o rótulo de classe não está no seed service_class_map.
+        data_tests:
+          - not_null:
+              name: captures_with_unknown_service_class
+              config:
+                severity: warn
+      - name: departure_at
+        data_type: datetime
+        description: Data e hora local da saída, como aparece no site.
+        constraints: [{type: not_null}]
+      - name: departure_date
+        data_type: date
+      - name: departure_time
+        data_type: time
+      - name: captured_at
+        data_type: timestamp
+        constraints: [{type: not_null}]
+      - name: capture_date
+        data_type: date
+        description: Data local (America/Sao_Paulo) da captura.
+        constraints: [{type: not_null}]
+      - name: days_before_departure
+        data_type: int64
+        description: Antecedência - dias entre a captura e a saída.
+      - name: antecedence_band
+        data_type: string
+      - name: antecedence_band_order
+        data_type: int64
+      - name: price
+        data_type: numeric
+        description: Tarifa capturada. Nula quando a saída está esgotada.
+      - name: seats_available
+        data_type: int64
+      - name: is_sold_out
+        data_type: bool
+      - name: origin_name
+        data_type: string
+      - name: destination_name
+        data_type: string
+      - name: service_class_label
+        data_type: string
+      - name: ingested_at
+        data_type: timestamp
+
+  - name: fct_fare_snapshot_daily
+    description: Última captura de cada dia por concorrente, rota, saída e classe.
+    config:
+      meta:
+        owner: analytics-engineering
+        grain: concorrente x rota x saída x classe x dia de captura
+        freshness_sla: D-1 até 07h
+        ai_context: >
+          Uma linha por dia de captura de cada saída. price é a tarifa vista no
+          fim do dia; é nula quando is_sold_out = true. Para comparar empresas,
+          filtre a mesma days_before_departure.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [competitor_id, route_id, class_code, departure_at, capture_date]
+    columns:
+      - name: route_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_route')
+                field: route_id
+      - name: class_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_class')
+                field: class_code
+      - name: competitor_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_competitor')
+                field: competitor_id
+      - name: captures_in_day
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+
+  - name: fct_fare_interval
+    description: Um período de mesma tarifa (ou de esgotamento) de cada saída, no tempo de captura.
+    config:
+      meta:
+        owner: analytics-engineering
+        grain: um período de mesma tarifa de uma saída
+        ai_context: >
+          valid_to nulo significa período vigente na última captura. Para saber
+          a tarifa em uma data, use valid_from <= data e (valid_to > data ou
+          valid_to nulo).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [competitor_id, route_id, class_code, departure_at, valid_from]
+      - dbt_utils.expression_is_true:
+          name: fare_interval_dates_are_ordered
+          arguments:
+            expression: "last_seen_date >= valid_from and (valid_to is null or valid_to >= last_seen_date)"
+    columns:
+      - name: fare_interval_key
+        data_tests: [unique, not_null]
+
+  - name: agg_fare_curve
+    description: >
+      Nossa tarifa x mercado na mesma antecedência, por rota, classe e data da
+      saída. Fonte principal do Power BI. Contrato fixo para proteger o painel
+      de mudanças de coluna.
+    config:
+      contract:
+        enforced: true
+      meta:
+        owner: analytics-engineering
+        grain: rota x classe x data da saída x antecedência
+        freshness_sla: D-1 até 07h
+        consumers: [painel Power BI, camada semântica]
+        ai_context: >
+          Fonte preferencial para perguntas sobre nossa tarifa x mercado. As
+          médias já estão calculadas por linha: para agregar várias linhas, use
+          as métricas da camada semântica (média ponderada por saídas), nunca a
+          média de our_avg_price.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, class_code, departure_date, days_before_departure]
+    columns:
+      - name: route_id
+        data_type: int64
+        constraints: [{type: not_null}]
+      - name: class_code
+        data_type: string
+        constraints: [{type: not_null}]
+      - name: departure_date
+        data_type: date
+        constraints: [{type: not_null}]
+      - name: days_before_departure
+        data_type: int64
+        constraints: [{type: not_null}]
+        description: '{{ doc("antecedence") }}'
+      - name: capture_date
+        data_type: date
+      - name: antecedence_band
+        data_type: string
+      - name: antecedence_band_order
+        data_type: int64
+      - name: our_departures
+        data_type: int64
+      - name: our_sold_out_departures
+        data_type: int64
+      - name: our_avg_price
+        data_type: numeric
+      - name: competitors_count
+        data_type: int64
+      - name: market_departures
+        data_type: int64
+      - name: market_sold_out_departures
+        data_type: int64
+      - name: market_min_price
+        data_type: numeric
+      - name: market_avg_price
+        data_type: numeric
+      - name: market_max_price
+        data_type: numeric
+      - name: cheapest_competitor_id
+        data_type: int64
+      - name: price_index
+        data_type: numeric
+        description: '{{ doc("price_index") }}'
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+      - name: price_position
+        data_type: string
+        description: '{{ doc("price_position") }}'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['mais barato que todos', 'dentro da faixa', 'mais caro que todos', 'sem tarifa nossa', 'sem tarifa do mercado']
+
+  - name: dim_competitor
+    columns:
+      - name: competitor_id
+        data_tests: [unique, not_null]
+
+  - name: dim_route
+    columns:
+      - name: route_id
+        data_tests: [unique, not_null]
+
+  - name: dim_service_class
+    columns:
+      - name: class_code
+        data_tests: [unique, not_null]
+
+  - name: dim_date
+    description: Calendário em dois papéis - data da captura e data da saída. Também é o time spine da camada semântica.
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day
+        data_tests: [unique, not_null]

@@ -1,0 +1,38 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Dados brutos carregados por ingestion/load_to_bigquery.py.
+    schema: raw
+    tables:
+      - name: price_captures
+        description: >
+          Tarifas capturadas nos sites dos concorrentes, como chegaram do scraper.
+          Uma partição por data de ingestão. Pode ter reenvios e chegadas atrasadas.
+          Exige filtro de partição em _ingest_date: os testes de qualidade ficam nos modelos.
+        config:
+          loaded_at_field: ingested_at
+          freshness:
+            warn_after: {count: 2, period: day}
+            error_after: {count: 4, period: day}
+            # a tabela exige filtro de partição
+            filter: _ingest_date >= date_sub(current_date(), interval 7 day)
+          meta:
+            owner: time de coleta (scraper)
+            sla: "carga diária até 06h (America/Sao_Paulo)"
+        data_tests:
+          # contrato de entrada: o build para aqui se o scraper mudar o layout
+          - has_expected_columns:
+              name: raw_price_captures_has_expected_columns
+              arguments:
+                column_names: [competitor_id, origin_name, destination_name, departure_at,
+                               service_class_label, price, seats_available, is_sold_out,
+                               captured_at, ingested_at, _ingest_date, source_file]
+      - name: competitors
+        description: Empresas monitoradas, incluindo a nossa (is_own_company).
+      - name: localities
+        description: Cidades da nossa malha, com código IBGE.
+      - name: routes
+        description: Nossas rotas (par origem e destino, em cada sentido).
+      - name: locality_aliases
+        description: Grafia de cada cidade em cada site de concorrente.

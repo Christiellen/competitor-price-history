@@ -1,0 +1,44 @@
+name: price_history
+version: "1.0.0"
+config-version: 2
+profile: price_history
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+clean-targets: ["target", "dbt_packages"]
+
+seed-paths: ["seeds"]
+
+vars:
+  # fuso usado para transformar o momento da captura (UTC) em data local
+  local_timezone: "America/Sao_Paulo"
+  # primeira data considerada na carga completa (também satisfaz o
+  # require_partition_filter da tabela raw)
+  start_date: "2000-01-01"
+  # quantos dias de ingestão voltar em cada carga incremental, para pegar
+  # capturas que chegaram atrasadas ou foram reenviadas
+  lookback_days: 3
+  # variação diária acima deste percentual gera alerta de qualidade
+  price_jump_threshold: 0.5
+
+models:
+  price_history:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+
+seeds:
+  price_history:
+    +schema: reference
+
+tests:
+  price_history:
+    +store_failures: false

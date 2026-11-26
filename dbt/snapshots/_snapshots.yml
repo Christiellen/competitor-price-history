@@ -1,0 +1,48 @@
+version: 2
+
+# Histórico (SCD tipo 2) dos cadastros que mudam pouco, mas mudam: um
+# concorrente troca de canal de venda, uma rota tem a distância corrigida.
+# As tabelas raw só guardam o estado atual; o snapshot guarda cada versão com
+# dbt_valid_from e dbt_valid_to, para responder "como era o cadastro na data da
+# captura?" sem depender de quem alimenta a origem.
+#
+# Estratégia check: a origem não tem coluna de atualização confiável, então o
+# dbt compara as colunas listadas a cada execução.
+# hard_deletes: invalidate - registro que some da origem é encerrado, não apagado.
+# dbt_valid_to_current - a versão vigente fica com 9999-12-31 em vez de nulo,
+# o que simplifica o join por intervalo (between valid_from and valid_to).
+
+snapshots:
+  - name: snap_competitors
+    description: Histórico do cadastro de empresas monitoradas (uma linha por versão).
+    relation: source('raw', 'competitors')
+    config:
+      schema: snapshots
+      unique_key: competitor_id
+      strategy: check
+      check_cols: [competitor_name, channel, is_own_company]
+      hard_deletes: invalidate
+      dbt_valid_to_current: "timestamp('9999-12-31')"
+      meta:
+        owner: analytics-engineering
+        grain: uma versão do cadastro de uma empresa
+    columns:
+      - name: competitor_id
+        data_tests: [not_null]
+
+  - name: snap_routes
+    description: Histórico do cadastro de rotas da nossa malha (uma linha por versão).
+    relation: source('raw', 'routes')
+    config:
+      schema: snapshots
+      unique_key: route_id
+      strategy: check
+      check_cols: [origin_locality_id, destination_locality_id, distance_km]
+      hard_deletes: invalidate
+      dbt_valid_to_current: "timestamp('9999-12-31')"
+      meta:
+        owner: analytics-engineering
+        grain: uma versão do cadastro de uma rota
+    columns:
+      - name: route_id
+        data_tests: [not_null]

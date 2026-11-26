@@ -1,0 +1,11 @@
+raw_label,class_code,class_name,class_rank
+CONVENCIONAL,CONV,Convencional,1
+CONV.,CONV,Convencional,1
+EXECUTIVO,EXEC,Executivo,2
+EXEC.,EXEC,Executivo,2
+SEMI-LEITO,SEMI,Semi-leito,3
+SEMILEITO,SEMI,Semi-leito,3
+SEMI LEITO,SEMI,Semi-leito,3
+LEITO,LEITO,Leito,4
+LEITO CAMA,LEITO,Leito,4
+LEITO-CAMA,LEITO,Leito,4

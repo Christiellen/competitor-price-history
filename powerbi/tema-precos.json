@@ -1,0 +1,32 @@
+{
+  "name": "Preços da Concorrência",
+  "dataColors": ["#1F4E79", "#E8251A", "#2E8B57", "#F2A900", "#6A4C93", "#00838F", "#8D6E63", "#5C6B73"],
+  "background": "#FFFFFF",
+  "foreground": "#1B1F23",
+  "tableAccent": "#1F4E79",
+  "good": "#2E8B57",
+  "neutral": "#F2A900",
+  "bad": "#E8251A",
+  "maximum": "#1F4E79",
+  "center": "#D5DBE0",
+  "minimum": "#E8251A",
+  "textClasses": {
+    "title": { "fontFace": "Segoe UI Semibold", "fontSize": 14, "color": "#1B1F23" },
+    "header": { "fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#1B1F23" },
+    "label": { "fontFace": "Segoe UI", "fontSize": 10, "color": "#4B5560" },
+    "callout": { "fontFace": "Segoe UI Semibold", "fontSize": 28, "color": "#1B1F23" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "border": [{ "show": false }],
+        "background": [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } }, "transparency": 0 }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#EEF1F3" } }, "transparency": 0 }]
+      }
+    }
+  }
+}
