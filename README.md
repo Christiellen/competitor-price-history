@@ -44,6 +44,18 @@ flowchart LR
 | Integração contínua | GitHub Actions | `.github/workflows/` |
 | Visualização | Power BI | `powerbi/` |
 
+### Linhagem no dbt docs
+
+Das fontes `raw` ao painel e às métricas da camada semântica (`dbt docs`,
+seleção `+agg_fare_curve+`):
+
+![Linhagem do projeto no dbt docs](docs/img/linhagem.png)
+
+Cada mart publica grão, dono, SLA e contexto para agentes de IA, além do
+contract, da partição e do cluster:
+
+![Metadados do agg_fare_curve no dbt docs](docs/img/agg_fare_curve_detalhes.png)
+
 ## Modelagem
 
 | Modelo | Grão | Materialização |
@@ -156,6 +168,29 @@ passam por todos os outros testes.
 - [`docs/adr/`](docs/adr/): decisões de arquitetura (partição da fato de
   capturas, métricas na camada semântica).
 
+## Execução no BigQuery
+
+Resultado com os dados padrão (180 dias, 2.467.752 capturas):
+
+| Execução | Resultado |
+|---|---|
+| `dbt build` (carga completa) | 73 nós: 70 aprovados, 2 alertas, 0 erros, em cerca de 1 min |
+| `dbt build --select fct_fare_capture+` (incremental) | 37 nós, 0 erros; 4 datas de captura afetadas reprocessadas |
+| `dbt source freshness` | aprovado |
+
+Os dois alertas são os previstos: 7.200 capturas fora da nossa malha e 6.480 com
+rótulo de classe desconhecido, exatamente o que o gerador injeta.
+
+| Modelo | Linhas | Carga completa | Incremental |
+|---|---|---|---|
+| `fct_fare_capture` | 2,4 milhões | 247,6 MiB | 22,6 MiB |
+| `fct_fare_snapshot_daily` | 2,2 milhões | 270,0 MiB | 12,3 MiB |
+| `fct_fare_interval` | 424,2 mil | 132,8 MiB | (tabela) |
+| `agg_fare_curve` | 498,8 mil | 115,8 MiB | (tabela) |
+
+O incremental por datas afetadas processa de 11 a 22 vezes menos bytes que a
+carga completa nas duas fatos.
+
 ## Custo
 
 - Carga por load job (gratuita), não por streaming.
@@ -166,7 +201,7 @@ passam por todos os outros testes.
 
 `dbt/analyses/custo_particao_cluster.sql` compara os bytes processados com e sem
 partição e cluster, inclusive o custo da escolha da partição por data de
-captura. Preencha com os números do seu projeto:
+captura. Números para preencher com consultas avulsas:
 
 | Consulta | Bytes processados |
 |---|---|
