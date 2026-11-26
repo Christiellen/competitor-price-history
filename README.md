@@ -1,4 +1,4 @@
-# Tarifas da Concorrência no Rodoviário - dbt + BigQuery + Power BI
+# Tarifas da Concorrência - dbt + BigQuery + Power BI
 
 Pipeline analítico para uma viação que monitora as tarifas dos concorrentes:
 leva as capturas de preço para o BigQuery, modela o histórico com dbt (modelo
